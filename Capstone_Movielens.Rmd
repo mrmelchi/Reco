@@ -1,0 +1,197 @@
+---
+title: "Predict movie rating"
+author: "Mario R. Melchiori"
+date: "20/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, cache= TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Recommendation systems use rating data from many products and users to make recommendations for a specific user. 
+
+Netflix uses a recommendation system to predict your ratings for a specific movie.
+
+On October 2006 Netflix offered a challenge to the data science community: improve our recommendation algorithm by 10% and win a million dollars. In September 2009 
+[the winners were announced](http://bits.blogs.nytimes.com/2009/09/21/netflix-awards-1-million-prize-and-starts-a-new-contest/).
+
+In this capstone, we will build your own recommendation system.
+
+Below, we will try out different models.
+
+We keep track of the RMSE we get for each one because we will report the best (lower) on validation set, at the end.
+
+The definition of root mean square error (RMSE) is square root of the average of the residuals squared:
+
+$$\mbox{RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^N (\hat{Y}_i - Y_i)^2}$$
+
+where $Y_i$ is the true $i$-th movie rating and $\hat{Y}_i$ our predicted rating. 
+We can interpret this similarly to a standard deviation.
+It is the typical error we make when predicting a movie rating.
+
+We write a function called `RMSE()` that takes two numeric vectors
+(one corresponding to the true movie ratings, and one 
+corresponding to predicted movie ratings) as input, and returns 
+the root mean square error (RMSE) between the two as output. 
+
+The definition of root mean square error is square root of the 
+average of the residuals squared:
+
+```{r}
+## RMSE compute root mean square error (RMSE)
+RMSE <- function(true_ratings, predicted_ratings){
+    sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+RMSE was the metric used to judge entries in the Netflix challenge.
+The lower the RMSE was on Netflix's quiz set between the submitted 
+rating predictions and the actual ratings, the better the method was. 
+We will be using RMSE to evaluate our machine learning models in 
+this capstone as well.
+
+## The data
+
+We will download the MovieLens data and run the foolowing code the staff provided to generate the datasets. We will use the 10M version of the MovieLens dataset available [here] (https://grouplens.org/datasets/movielens/10m/).
+
+We develop our algorithm using the edx set. For a final test of the algorithm, predict movie ratings in the validation set as if they were unknown. RMSE will be used to evaluate how close your predictions are to the true values in the validation set.
+
+```{r}
+#############################################################
+# Create edx set, validation set, and submission file
+#############################################################
+
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                      col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+
+set.seed(1)
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+
+validation <- temp %>% 
+     semi_join(edx, by = "movieId") %>%
+     semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+
+
+*The data set is very long, so we use the models as long as the dataset can fit and be processed within the available RAM on one machine*.
+
+Let'me randomly split the `edx` set into training and test data. 
+Use `set.seed(1)` and the `createDataPartition`'s caret function to select your test index to create two separate data frames called: `train` and `test` from 
+the original `edx` data frame. `test` contain a randomly selected 10% of the 
+rows of `edx`, and have `train` contain the other 90%. We will use these data frames to do the rest of the analyses. In the code, we make sure userId and 
+movieId in test set are also in train set and add rows removed from `test` set 
+back into `train` set.
+After you create `train` and `test`, we remove `edx`,`removed`,`temp`,`test_index` to save space. 
+
+```{r}
+set.seed(1)
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.1, list = FALSE)
+train <- edx[-test_index,]
+temp <- edx[test_index,]
+
+# Make sure userId and movieId in test set are also in train set
+
+test <- temp %>% 
+  semi_join(train, by = "movieId") %>%
+  semi_join(train, by = "userId")
+
+# Add rows removed from test set back into train set
+
+removed <- anti_join(temp, test)
+train <- rbind(train, removed)
+
+# to save space
+rm(edx, removed, temp, test_index) 
+```
+
+## Data Exploration
+
+How many users are there in the `train` data set? 
+How many movies are in the `train` data set? 
+What is the lowest rating in the `train` data set? The highest? 
+
+```{r}
+train %>% summarize(
+  n_users=n_distinct(userId),
+  n_movies=n_distinct(movieId),
+  min_rating=min(rating),  
+  max_rating=max(rating))
+```
+```{r}
+keep <- train %>% 
+  count(movieId) %>% 
+  top_n(5, n) %>% 
+  .$movieId
+
+tab <- train %>% 
+  filter(movieId%in%keep) %>% 
+  filter(userId %in% c(13:20)) %>% 
+  select(userId, title, rating) %>% 
+  mutate(title = str_remove(title, ", The"),
+         title = str_remove(title, ":.*")) %>%
+  spread(title, rating)
+tab %>% knitr::kable()
+
+users <- sample(unique(train$userId), 100)
+rafalib::mypar()
+train %>% filter(userId %in% users) %>% 
+  select(userId, movieId, rating) %>%
+  mutate(rating = 1) %>%
+  spread(movieId, rating) %>% select(sample(ncol(.), 100)) %>% 
+  as.matrix() %>% t(.) %>%
+  image(1:100, 1:100,. , xlab="Movies", ylab="Users")
+abline(h=0:100+0.5, v=0:100+0.5, col = "grey")
+
+train %>% 
+  count(movieId) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color = "black") + 
+  scale_x_log10() + 
+  ggtitle("Movies")
+
+train %>% 
+  count(userId) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins = 30, color = "black") + 
+  scale_x_log10() + 
+  ggtitle("Users")
+
+rm(tab, keep, users)
+```
