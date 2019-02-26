@@ -57,7 +57,6 @@ this capstone as well.
 
 We download the MovieLens data and run the following code the staff provided to generate the datasets. We use the 10M version of the MovieLens dataset available [here] (https://grouplens.org/datasets/movielens/10m/).
 
-We develop our algorithm using the edx set. For a final test of the algorithm, predict movie ratings in the validation set as if they were unknown. RMSE will be used to evaluate how close your predictions are to the true values in the validation set.
 
 ```{r}
 #############################################################
@@ -115,9 +114,8 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 We randomly split the `edx` set into training and test data. 
 We use `set.seed(1)` and the `createDataPartition`'s caret function to select your test index to create two separate data frames called: `train` and `test` from 
 the original `edx` data frame. `test` contain a randomly selected 10% of the 
-rows of `edx`, and have `train` contain the other 90%. We will use these data frames to do the rest of the analyses. In the code, we make sure userId and 
-movieId in test set are also in train set and add rows removed from `test` set 
-back into `train` set.
+rows of `edx`, and have `train` contain the other 90%. We will use these data frames to do the rest of the analyses. 
+In the code, we make sure userId and movieId in test set are also in train set and add rows removed from `test` set back into `train` set.
 After you create `train` and `test`, we remove `edx`,`removed`,`temp`,`test_index` to save space. 
 
 ```{r}
