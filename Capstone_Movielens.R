@@ -85,7 +85,7 @@ train <- rbind(train, removed)
 
 rm(edx, removed, temp, test_index) 
 
-head(train)
+train %>% as_tibble()
 
 train %>% 
   summarize(n_users = n_distinct(userId),
