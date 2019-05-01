@@ -191,7 +191,7 @@ $(document).ready(function () {
 
 <h1 class="title toc-ignore">Predict movie rating</h1>
 <h4 class="author">Mario R. Melchiori</h4>
-<h4 class="date">20/2/2019</h4>
+<h4 class="date">1/5/2019</h4>
 
 </div>
 
@@ -308,7 +308,7 @@ removed &lt;- anti_join(temp, test)</code></pre>
 <pre class="r"><code>train &lt;- rbind(train, removed)</code></pre>
 <p>The code below is to save space.</p>
 <pre class="r"><code># to save space
-rm(edx, removed, temp, test_index) </code></pre>
+rm(removed, temp, test_index) </code></pre>
 </div>
 <div id="data-exploration" class="section level2">
 <h2>Data Exploration</h2>
@@ -573,7 +573,9 @@ rmse_results %&gt;% knitr::kable()</code></pre>
 </div>
 <div id="regularization" class="section level3">
 <h3>Regularization</h3>
-<p>Regularization permits us to penalize large estimates that are formed using small sample sizes. In this case, the long dataset prevents obscure movies with just a few users,increase our RMSE, so the regularization did not reduce the RMSE. However, we will explore where we made mistakes in our first model, using only movie effects <span class="math inline">\(b_i\)</span>. Let’s look at the top 10 worst and best movies based on <span class="math inline">\(b_i\)</span> and look at how often they are rated. First, let’s create a database that connects movieId to movie title:</p>
+<p>Regularization permits us to penalize large estimates that are formed using small sample sizes.</p>
+<p>These are noisy estimates that we should not trust, especially when it comes to prediction. Large errors can increase our RMSE, so we would rather be conservative when unsure.</p>
+<p>Let’s look at the top 10 worst and best movies based on <span class="math inline">\(\hat{b}_i\)</span>. First, let’s create a database that connects <code>movieId</code> to movie title:</p>
 <pre class="r"><code># Regularization
 
 # connect movieId to movie title
@@ -838,11 +840,9 @@ train %&gt;% count(movieId) %&gt;%
 </tbody>
 </table>
 <p>The supposed “best” and “worst” movies were rated by very few users, in most cases just 1. These movies were mostly obscure ones. This is because with just a few users, we have more uncertainty. Therefore, larger estimates of <span class="math inline">\(b_i\)</span>, negative or positive, are more likely.</p>
-<p>These are noisy estimates that we should not trust, especially when it comes to prediction. Large errors can increase our RMSE, so we would rather be conservative when unsure.</p>
-<p>But, we repeat, in this case the noise is neligible because of a lot of data.</p>
 <div id="choosing-the-penalty-terms" class="section level4">
 <h4>Choosing the penalty terms</h4>
-<p>We use regularization for the estimate both movie and user effects as well. We are minimizing:</p>
+<p>We use regularization for the estimate both movie and user effects. We are minimizing:</p>
 <p><span class="math display">\[
 \frac{1}{N} \sum_{u,i} \left(y_{u,i} - \mu - b_i - b_u \right)^2 + 
 \lambda \left(\sum_{i} b_i^2 + \sum_{u} b_u^2\right)
@@ -877,10 +877,11 @@ qplot(lambda, rmses)  </code></pre>
 <pre class="r"><code>lambda &lt;- lambda[which.min(rmses)]
 lambda</code></pre>
 <pre><code>## [1] 0.5</code></pre>
+<p>We use the test set for the final assessment of our third model</p>
 <pre class="r"><code>b_i &lt;- test %&gt;% 
   group_by(movieId) %&gt;%
   summarize(b_i = sum(rating - mu)/(n()+lambda))
-  
+
 b_u &lt;- test %&gt;% 
     left_join(b_i, by=&quot;movieId&quot;) %&gt;%
     group_by(userId) %&gt;%
@@ -926,6 +927,211 @@ rmse_results %&gt;% knitr::kable()</code></pre>
 </tbody>
 </table>
 </div>
+</div>
+<div id="matrix-factorization" class="section level3">
+<h3>Matrix factorization</h3>
+<p>We have described how the model:</p>
+<p><span class="math display">\[ 
+Y_{u,i} = \mu + b_i + b_u + \varepsilon_{u,i}
+\]</span></p>
+<p>accounts for movie to movie differences through the <span class="math inline">\(b_i\)</span> and user to user differences through the <span class="math inline">\(b_u\)</span>. But this model leaves out an important source of variation related to the fact that groups of movies have similar rating patterns and groups of users have similar rating patterns as well. We will discover these patterns by studying the residuals:</p>
+<p><span class="math display">\[
+r_{u,i} = y_{u,i} - \hat{b}_i - \hat{b}_u
+\]</span></p>
+<p>We compute the residuals for train and test set:</p>
+<pre class="r"><code>train &lt;- train %&gt;% 
+  left_join(b_i, by = &quot;movieId&quot;) %&gt;%
+  left_join(b_u, by = &quot;userId&quot;) %&gt;%
+  mutate(res = rating - mu - b_i - b_u)
+
+test &lt;- test %&gt;% 
+  left_join(b_i, by = &quot;movieId&quot;) %&gt;%
+  left_join(b_u, by = &quot;userId&quot;) %&gt;%
+  mutate(res = rating - mu - b_i - b_u)
+
+# Install/Load recosystem
+if(!require(recosystem)) install.packages(&quot;recosystem&quot;, repos = &quot;http://cran.us.r-project.org&quot;)</code></pre>
+<pre><code>## Loading required package: recosystem</code></pre>
+<pre class="r"><code># Using recosystem 
+train_data &lt;- data_memory(user_index = train$userId, item_index = train$movieId, 
+                          rating = train$res, index1 = T)
+  
+test_data &lt;- data_memory(user_index = test$userId, item_index = test$movieId, index1 = T)
+  
+recommender &lt;- Reco()
+set.seed(1)
+
+suppressWarnings(recommender$train(train_data))</code></pre>
+<pre><code>## iter      tr_rmse          obj
+##    0       0.8924  6.6478e+006
+##    1       0.8715  6.4387e+006
+##    2       0.8523  6.2685e+006
+##    3       0.8433  6.1965e+006
+##    4       0.8376  6.1654e+006
+##    5       0.8330  6.1368e+006
+##    6       0.8295  6.1172e+006
+##    7       0.8270  6.1045e+006
+##    8       0.8250  6.0924e+006
+##    9       0.8234  6.0836e+006
+##   10       0.8222  6.0791e+006
+##   11       0.8210  6.0724e+006
+##   12       0.8201  6.0687e+006
+##   13       0.8192  6.0654e+006
+##   14       0.8183  6.0624e+006
+##   15       0.8175  6.0593e+006
+##   16       0.8168  6.0551e+006
+##   17       0.8161  6.0509e+006
+##   18       0.8156  6.0518e+006
+##   19       0.8149  6.0484e+006</code></pre>
+<pre class="r"><code>predicted_ratings &lt;- recommender$predict(test_data, out_memory()) + mu + 
+                       test$b_i + test$b_u 
+
+  
+ind &lt;- which(predicted_ratings &gt; 5)
+predicted_ratings[ind] &lt;- 5
+  
+ind &lt;- which(predicted_ratings &lt; 0)
+predicted_ratings[ind] &lt;- 0
+  
+model_4_rmse &lt;- RMSE(test$rating, predicted_ratings)
+  
+rmse_results &lt;- bind_rows(rmse_results,
+                          tibble(method=&quot;Reg. Movie and User + Matrix Fact. on test set&quot;,  
+                                   RMSE = model_4_rmse))
+rmse_results %&gt;% knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">method</th>
+<th align="right">RMSE</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Just the average</td>
+<td align="right">1.0600537</td>
+</tr>
+<tr class="even">
+<td align="left">Movie Effect Model</td>
+<td align="right">0.9429615</td>
+</tr>
+<tr class="odd">
+<td align="left">Movie + User Effects Model</td>
+<td align="right">0.8646843</td>
+</tr>
+<tr class="even">
+<td align="left">Reg Movie + reg User Effect Model</td>
+<td align="right">0.8211935</td>
+</tr>
+<tr class="odd">
+<td align="left">Reg. Movie and User + Matrix Fact. on test set</td>
+<td align="right">0.7973372</td>
+</tr>
+</tbody>
+</table>
+<p>We use the validation set for the final assessment</p>
+<pre class="r"><code>mu &lt;- mean(edx$rating)
+
+b_i &lt;- edx %&gt;% 
+  group_by(movieId) %&gt;%
+  summarize(b_i = sum(rating - mu)/(n()+lambda))
+
+b_u &lt;- edx %&gt;% 
+    left_join(b_i, by=&quot;movieId&quot;) %&gt;%
+    group_by(userId) %&gt;%
+    summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
+
+edx &lt;- edx %&gt;% 
+  left_join(b_i, by = &quot;movieId&quot;) %&gt;%
+  left_join(b_u, by = &quot;userId&quot;) %&gt;%
+  mutate(res = rating - mu - b_i - b_u)
+
+validation &lt;- validation %&gt;% 
+  left_join(b_i, by = &quot;movieId&quot;) %&gt;%
+  left_join(b_u, by = &quot;userId&quot;) %&gt;%
+  mutate(res = rating - mu - b_i - b_u)
+
+# Using recosystem 
+train_data &lt;- data_memory(user_index = edx$userId, item_index = edx$movieId, 
+                          rating = edx$res, index1 = T)
+  
+test_data &lt;- data_memory(user_index = validation$userId, item_index = validation$movieId, index1 = T)
+  
+recommender &lt;- Reco()
+set.seed(1)
+
+suppressWarnings(recommender$train(train_data))</code></pre>
+<pre><code>## iter      tr_rmse          obj
+##    0       0.8555  6.7765e+006
+##    1       0.8423  6.6123e+006
+##    2       0.8329  6.5140e+006
+##    3       0.8282  6.4819e+006
+##    4       0.8246  6.4641e+006
+##    5       0.8220  6.4481e+006
+##    6       0.8201  6.4343e+006
+##    7       0.8188  6.4288e+006
+##    8       0.8175  6.4245e+006
+##    9       0.8164  6.4201e+006
+##   10       0.8154  6.4160e+006
+##   11       0.8145  6.4115e+006
+##   12       0.8138  6.4073e+006
+##   13       0.8132  6.4050e+006
+##   14       0.8127  6.4041e+006
+##   15       0.8123  6.4017e+006
+##   16       0.8119  6.3992e+006
+##   17       0.8116  6.3977e+006
+##   18       0.8113  6.3966e+006
+##   19       0.8110  6.3960e+006</code></pre>
+<pre class="r"><code>predicted_ratings &lt;- recommender$predict(test_data, out_memory()) + mu + 
+                       validation$b_i + validation$b_u 
+
+  
+ind &lt;- which(predicted_ratings &gt; 5)
+predicted_ratings[ind] &lt;- 5
+  
+ind &lt;- which(predicted_ratings &lt; 0)
+predicted_ratings[ind] &lt;- 0
+  
+model_5_rmse &lt;- RMSE(validation$rating, predicted_ratings)
+  
+rmse_results &lt;- bind_rows(rmse_results,
+                          tibble(method=&quot;Reg. Movie and User + Matrix Fact. on validation set&quot;,  
+                                   RMSE = model_5_rmse))
+rmse_results %&gt;% knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">method</th>
+<th align="right">RMSE</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Just the average</td>
+<td align="right">1.0600537</td>
+</tr>
+<tr class="even">
+<td align="left">Movie Effect Model</td>
+<td align="right">0.9429615</td>
+</tr>
+<tr class="odd">
+<td align="left">Movie + User Effects Model</td>
+<td align="right">0.8646843</td>
+</tr>
+<tr class="even">
+<td align="left">Reg Movie + reg User Effect Model</td>
+<td align="right">0.8211935</td>
+</tr>
+<tr class="odd">
+<td align="left">Reg. Movie and User + Matrix Fact. on test set</td>
+<td align="right">0.7973372</td>
+</tr>
+<tr class="even">
+<td align="left">Reg. Movie and User + Matrix Fact. on validation set</td>
+<td align="right">0.8289052</td>
+</tr>
+</tbody>
+</table>
 </div>
 </div>
 

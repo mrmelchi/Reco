@@ -1,7 +1,7 @@
 ---
 title: "Predict movie rating"
 author: "Mario R. Melchiori"
-date: "20/2/2019"
+date: "1/5/2019"
 output: html_document
 ---
 
@@ -142,7 +142,7 @@ The code below is to save space.
 
 ```{r}
 # to save space
-rm(edx, removed, temp, test_index) 
+rm(removed, temp, test_index) 
 ```
 
 ## Data Exploration
@@ -353,7 +353,11 @@ rmse_results %>% knitr::kable()
 
 ### Regularization
 
-Regularization permits us to penalize large estimates that are formed using small sample sizes. In this case, the long dataset prevents obscure movies with just a few users,increase our RMSE, so the regularization did not reduce the RMSE. However, we will explore where we made mistakes in our first model, using only movie effects $b_i$. Let's look at the top 10 worst and best movies based on $b_i$ and look at how often they are rated. First, let's create a database that connects movieId to movie title:
+Regularization permits us to penalize large estimates that are formed using small sample sizes.
+
+These are noisy estimates that we should not trust, especially when it comes to prediction. Large errors can increase our RMSE, so we would rather be conservative when unsure.
+
+Let's look at the top 10 worst and best movies based on $\hat{b}_i$. First, let's create a database that connects `movieId` to movie title:
 
 ```{r}
 # Regularization
@@ -415,13 +419,9 @@ train %>% count(movieId) %>%
 
 The supposed "best" and "worst" movies were rated by very few users, in most cases just 1. These movies were mostly obscure ones. This is because with just a few users, we have more uncertainty. Therefore, larger estimates of $b_i$, negative or positive, are more likely.
 
-These are noisy estimates that we should not trust, especially when it comes to prediction. Large errors can increase our RMSE, so we would rather be conservative when unsure.
-
-But, we repeat, in this case the noise is neligible because of a lot of data.
-
 #### Choosing the penalty terms
 
-We use regularization for the estimate both movie and user effects as well. We are minimizing:
+We use regularization for the estimate both movie and user effects. We are minimizing:
 
 $$
 \frac{1}{N} \sum_{u,i} \left(y_{u,i} - \mu - b_i - b_u \right)^2 + 
@@ -459,11 +459,15 @@ qplot(lambda, rmses)
 
 lambda <- lambda[which.min(rmses)]
 lambda
+```
 
+We use the test set for the final assessment of our third model
+
+```{r}
 b_i <- test %>% 
   group_by(movieId) %>%
   summarize(b_i = sum(rating - mu)/(n()+lambda))
-  
+
 b_u <- test %>% 
     left_join(b_i, by="movieId") %>%
     group_by(userId) %>%
@@ -482,5 +486,124 @@ rmse_results <- bind_rows(rmse_results,
                           tibble(method="Reg Movie + reg User Effect Model",  
                                  RMSE = model_3_rmse))
 rmse_results %>% knitr::kable()
+```
+
+### Matrix factorization
+
+We have described how the model:
+
+$$ 
+Y_{u,i} = \mu + b_i + b_u + \varepsilon_{u,i}
+$$
+
+accounts for movie to movie differences through the $b_i$ and user to user differences through the $b_u$. But this model leaves out an important source of variation related to the fact that groups of movies have similar rating patterns and groups of users have similar rating patterns as well. We will discover these patterns by studying the residuals:
+
+$$
+r_{u,i} = y_{u,i} - \hat{b}_i - \hat{b}_u
+$$
+
+We compute the residuals for train and test set:
+
+```{r}
+train <- train %>% 
+  left_join(b_i, by = "movieId") %>%
+  left_join(b_u, by = "userId") %>%
+  mutate(res = rating - mu - b_i - b_u)
+
+test <- test %>% 
+  left_join(b_i, by = "movieId") %>%
+  left_join(b_u, by = "userId") %>%
+  mutate(res = rating - mu - b_i - b_u)
+```
+
+Matrix Factorization is a popular technique to solve recommender system problem. The main idea is to approximate the matrix R(m x n) by the product of two matrixes of lower dimension: P (k x m) and Q (k x n).
+
+Matrix P represents latent factors of users. So, each k-elements column of matrix P represents each user. Each k-elements column of matrix Q represents each item. So, to find rating for item i by user u we simply need to compute two vectors: P[,u]’ x Q[,i]. Short and full description of package is available [here](https://rpubs.com/tarashnot/recommender_comparison).
+
+This package works with data saved on disk in 3 columns with no headers:
+  
+# Using recosystem 
+train_data <- data_memory(user_index = train$userId, item_index = train$movieId, 
+                          rating = train$res, index1 = T)
+  
+test_data <- data_memory(user_index = test$userId, item_index = test$movieId, index1 = T)
+  
+recommender <- Reco()
+set.seed(1)
+
+suppressWarnings(recommender$train(train_data))
+
+predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + 
+                       test$b_i + test$b_u 
+
+  
+ind <- which(predicted_ratings > 5)
+predicted_ratings[ind] <- 5
+  
+ind <- which(predicted_ratings < 0)
+predicted_ratings[ind] <- 0
+  
+model_4_rmse <- RMSE(test$rating, predicted_ratings)
+  
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="Reg. Movie and User + Matrix Fact. on test set",  
+                                   RMSE = model_4_rmse))
+rmse_results %>% knitr::kable()
+
+```
+
+We use the validation set for the final assessment
+
+```{r}
+
+mu <- mean(edx$rating)
+
+b_i <- edx %>% 
+  group_by(movieId) %>%
+  summarize(b_i = sum(rating - mu)/(n()+lambda))
+
+b_u <- edx %>% 
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
+
+edx <- edx %>% 
+  left_join(b_i, by = "movieId") %>%
+  left_join(b_u, by = "userId") %>%
+  mutate(res = rating - mu - b_i - b_u)
+
+validation <- validation %>% 
+  left_join(b_i, by = "movieId") %>%
+  left_join(b_u, by = "userId") %>%
+  mutate(res = rating - mu - b_i - b_u)
+
+# Using recosystem 
+train_data <- data_memory(user_index = edx$userId, item_index = edx$movieId, 
+                          rating = edx$res, index1 = T)
+  
+test_data <- data_memory(user_index = validation$userId, item_index = validation$movieId, index1 = T)
+  
+recommender <- Reco()
+set.seed(1)
+
+suppressWarnings(recommender$train(train_data))
+
+predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + 
+                       validation$b_i + validation$b_u 
+
+  
+ind <- which(predicted_ratings > 5)
+predicted_ratings[ind] <- 5
+  
+ind <- which(predicted_ratings < 0)
+predicted_ratings[ind] <- 0
+  
+model_5_rmse <- RMSE(validation$rating, predicted_ratings)
+  
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="Reg. Movie and User + Matrix Fact. on validation set",  
+                                   RMSE = model_5_rmse))
+rmse_results %>% knitr::kable()
+
 ```
 
