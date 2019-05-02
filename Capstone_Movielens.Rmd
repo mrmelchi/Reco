@@ -291,7 +291,7 @@ predicted_ratings <- mu + test %>%
 
 model_1_rmse <- RMSE(predicted_ratings, test$rating)
 rmse_results <- bind_rows(rmse_results,
-                          tibble(method="Movie Effect Model",  
+                          tibble(method="Movie Effect Model on test set",  
                                      RMSE = model_1_rmse ))
 rmse_results %>% knitr::kable()
 ```
@@ -346,7 +346,7 @@ predicted_ratings <- test %>%
 
 model_2_rmse <- RMSE(predicted_ratings, test$rating)
 rmse_results <- bind_rows(rmse_results,
-                          tibble(method="Movie + User Effects Model",  
+                          tibble(method="Movie and User Effects Model on test set",  
                                      RMSE = model_2_rmse ))
 rmse_results %>% knitr::kable()
 ```
@@ -483,7 +483,7 @@ predicted_ratings <-
 model_3_rmse <- RMSE(test$rating, predicted_ratings)
 
 rmse_results <- bind_rows(rmse_results,
-                          tibble(method="Reg Movie + reg User Effect Model",  
+                          tibble(method="Reg Movie and User Effect Model on test set",  
                                  RMSE = model_3_rmse))
 rmse_results %>% knitr::kable()
 ```
@@ -520,23 +520,87 @@ Matrix Factorization is a popular technique to solve recommender system problem.
 
 Matrix P represents latent factors of users. So, each k-elements column of matrix P represents each user. Each k-elements column of matrix Q represents each item. So, to find rating for item i by user u we simply need to compute two vectors: P[,u]’ x Q[,i]. Short and full description of package is available [here](https://rpubs.com/tarashnot/recommender_comparison).
 
-This package works with data saved on disk in 3 columns with no headers:
-  
+This package works with data saved on disk in 3 columns with no headers.
+
+The usage of recosystem is quite simple, mainly consisting of the following steps:
+
+ - Create a model object (a Reference Class object in R) by calling Reco().
+ - (Optionally) call the $tune() method to select best tuning parameters along a set of candidate values.
+ - Train the model by calling the $train() method. A number of parameters can be set inside the function, possibly   coming from the result of $tune().
+ - (Optionally) export the model via $output(), i.e. write the factorization matrices P and Q into files or return them as R objects.
+ - Use the $predict() method to compute predicted values.
+
+```{r}
+
 # Using recosystem 
+# Install/Load recosystem
+if(!require(recosystem)) install.packages("recosystem", repos = "http://cran.us.r-project.org")
+
 train_data <- data_memory(user_index = train$userId, item_index = train$movieId, 
                           rating = train$res, index1 = T)
   
 test_data <- data_memory(user_index = test$userId, item_index = test$movieId, index1 = T)
   
 recommender <- Reco()
-set.seed(1)
 
-suppressWarnings(recommender$train(train_data))
 
-predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + 
-                       test$b_i + test$b_u 
+```
 
-  
+We use cross validation to tune the model parameters. Choices for parameters were optimized using RMSE as a loss function. The code does not run here as it takes over one hours to optimize, but we show the oput of the code.
+
+```{r}
+set.seed(1) # This is a randomized algorithm
+
+# res = recommender$tune(
+#     train_data,
+#     opts = list(dim = c(10, 20, 30),
+#                 costp_l1 = 0, costq_l1 = 0,
+#                 lrate = c(0.05, 0.1, 0.2), nthread = 2)
+# )
+#  res[["min"]]
+# $dim
+# [1] 30
+# 
+# $costp_l1
+# [1] 0
+# 
+# $costp_l2
+# [1] 0.01
+# 
+# $costq_l1
+# [1] 0
+# 
+# $costq_l2
+# [1] 0.1
+# 
+# $lrate
+# [1] 0.1
+# 
+# $loss_fun
+# [1] 0.8007686
+
+```
+
+The following code trains a recommender model. It will read from a training data source and create a model file at the specified location. The model file contains necessary information for prediction.
+
+```{r}
+# Training model from a data file
+set.seed(1) # This is a randomized algorithm
+suppressWarnings(recommender$train(train_data, opts = c(dim = 30, costp_l1 = 0,
+                                                        costp_l2 = 0.01, costq_l1 = 0,
+                                                        costq_l2 = 0.1, lrate = 0.1,
+                                                        verbose = FALSE)))
+```
+
+We predict unknown entries in the rating matrix on test set.
+
+```{r}
+predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + test$b_i + test$b_u 
+```
+
+We use the test set for the final assessment
+
+```{r}  
 ind <- which(predicted_ratings > 5)
 predicted_ratings[ind] <- 5
   
@@ -552,7 +616,8 @@ rmse_results %>% knitr::kable()
 
 ```
 
-We use the validation set for the final assessment
+Lastly, to meet the requirements of the project we calculate the final RMSE on the validation dataset.
+We will use the edx dataset provided that ensures that it contains the users who are in validation set.
 
 ```{r}
 
@@ -586,7 +651,11 @@ test_data <- data_memory(user_index = validation$userId, item_index = validation
 recommender <- Reco()
 set.seed(1)
 
-suppressWarnings(recommender$train(train_data))
+suppressWarnings(recommender$train(train_data, opts = c(dim = 30, costp_l1 = 0,
+                                                        costp_l2 = 0.01, costq_l1 = 0,
+                                                        costq_l2 = 0.1, lrate = 0.1,
+                                                        verbose = FALSE)))
+
 
 predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + 
                        validation$b_i + validation$b_u 
