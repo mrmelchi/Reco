@@ -3,8 +3,8 @@ title: "Predict movie rating"
 author: "Mario R. Melchiori"
 date: "1/5/2019"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE, cache= TRUE}
@@ -22,7 +22,7 @@ On October 2006 Netflix offered a challenge to the data science community: impro
 
 In this capstone, we will build our own recommendation system.
 
-Below, we will try out different models.
+Below, we will try out different models. Mainly, we use the methodology presented in the [course's book](https://rafalab.github.io/dsbook/large-datasets.html#recommendation-systems), but adding the Matrix Factorization model, which was only introduced in it.
 
 We keep track of the RMSE we get for each one because we will report the best (lower) on validation set, at the end.
 
@@ -34,13 +34,9 @@ where $Y_i$ is the true $i$-th movie rating and $\hat{Y}_i$ our predicted rating
 We can interpret this similarly to a standard deviation.
 It is the typical error we make when predicting a movie rating.
 
-We write a function called `RMSE()` that takes two numeric vectors
-(one corresponding to the true movie ratings, and one 
-corresponding to predicted movie ratings) as input, and returns 
-the root mean square error (RMSE) between the two as output. 
+We write a function called `RMSE()` that takes two numeric vectors (one corresponding to the true movie ratings, and one  corresponding to predicted movie ratings) as input, and returns the root mean square error (RMSE) between the two as output. 
 
-The definition of root mean square error is square root of the 
-average of the residuals squared:
+The definition of root mean square error is square root of the average of the residuals squared:
 
 ```{r}
 ## RMSE compute root mean square error (RMSE)
@@ -50,10 +46,8 @@ RMSE <- function(true_ratings, predicted_ratings){
 ```
 
 RMSE was the metric used to judge entries in the Netflix challenge.
-The lower the RMSE was on Netflix's quiz set between the submitted 
-rating predictions and the actual ratings, the better the method was. 
-We will be using RMSE to evaluate our machine learning models in 
-this capstone as well.
+The lower the RMSE was on Netflix's quiz set between the submitted rating predictions and the actual ratings, the better the method was. 
+We will be using RMSE to evaluate our machine learning models in this capstone as well.
 
 ## The data
 
@@ -116,7 +110,7 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 We randomly split the `edx` set into training and test data.
 We use `set.seed(1)` to provide a reproducible example and the `createDataPartition`'s caret function to select your test index to create two separate data frames called: `train` and `test` from the original `edx` data frame. `test` contain a randomly selected 10% of the rows of `edx`, and have `train` contain the other 90%. We will use these data frames to do the rest of the analyses. 
 In the code, we make sure userId and movieId in test set are also in train set and add rows removed from `test` set back into `train` set.
-After you create `train` and `test`, we remove `edx`,`removed`,`temp`,`test_index` to save space. 
+After you create `train` and `test`, we remove `removed`,`temp`,`test_index` to save space. 
 
 ```{r}
 # generate reproducible partition
@@ -152,6 +146,7 @@ rm(removed, temp, test_index)
 We can see this table is in tidy format with thousands of rows:
 
 ```{r}
+# show train set 
 train %>% as_tibble()
 ```
 
@@ -160,15 +155,17 @@ We can see the number of unique users from `train` that provided ratings and how
 
 ```{r}
 train %>% summarize(
-  n_users=n_distinct(userId),
-  n_movies=n_distinct(movieId),
-  min_rating=min(rating),  
-  max_rating=max(rating))
+n_users=n_distinct(userId),# unique users from train
+n_movies=n_distinct(movieId),# unique movies from train
+min_rating=min(rating),  # the lowest rating 
+max_rating=max(rating) # the highest rating
+)
 ```
 
 If we multiply `n_users` times `n_movie`s, we get a number almost of 750 million, yet our data table has about 8,000,000 rows. This implies that not every user rated every movie. So we can think of these data as a very large matrix, with users on the rows and movies on the columns, with many empty cells. The `gather` function permits us to convert it to this format, but if we try it for the entire matrix, it will crash R. Let's show the matrix for seven users and five movies.
 
 ```{r}
+# matrix for 5 movies and 7 users 
 keep <- train %>% 
   count(movieId) %>% 
   top_n(5, n) %>% 
@@ -187,6 +184,9 @@ tab %>% knitr::kable()
 You can think of the task of a recommendation system as filling in the `NA`s in the table above. To see how _sparse_ the matrix is, here is the matrix for a random sample of 100 movies and 100 users with yellow indicating a user/movie combination for which we have a rating.
 
 ```{r}
+# matrix for a random sample of 100 movies and 100 users with yellow 
+# indicating a user/movie combination for which we have a rating.
+
 users <- sample(unique(train$userId), 100)
 rafalib::mypar()
 train %>% filter(userId %in% users) %>% 
@@ -201,6 +201,7 @@ abline(h=0:100+0.5, v=0:100+0.5, col = "grey")
 The first thing we notice is that some movies get rated more than others. Here is the distribution:
 
 ```{r}
+# plot count rating by movie
 train %>% 
   count(movieId) %>% 
   ggplot(aes(n)) + 
@@ -212,6 +213,7 @@ train %>%
 Our second observation is that some users are more active than others at rating movies:
 
 ```{r}
+# plot count rating by user
 train %>% 
   count(userId) %>% 
   ggplot(aes(n)) + 
@@ -250,6 +252,8 @@ From looking at the distribution of ratings, we can visualize that this is the s
 As we will be comparing different approaches, we create a results table with this naive approach:
 
 ```{r}
+# create a results table with this approach
+
 rmse_results <- tibble(method = "Just the average", RMSE = naive_rmse)
 rmse_results %>% knitr::kable()
 ```
@@ -285,10 +289,12 @@ movie_avgs %>% qplot(b_i, geom ="histogram", bins = 10, data = ., color = I("bla
 Let's see how much our prediction improves once we use $\hat{y}_{u,i} = \hat{\mu} + \hat{b}_i$:
 
 ```{r}
+# create a results table with this and prior approaches
 predicted_ratings <- mu + test %>% 
   left_join(movie_avgs, by='movieId') %>%
   .$b_i
 
+# create a results table with this and prior approach
 model_1_rmse <- RMSE(predicted_ratings, test$rating)
 rmse_results <- bind_rows(rmse_results,
                           tibble(method="Movie Effect Model on test set",  
@@ -329,6 +335,7 @@ but, for the reasons described earlier, we won't. Instead, we will compute an ap
 
 
 ```{r}
+# compute user effect b_u
 user_avgs <- train %>% 
   left_join(movie_avgs, by='movieId') %>%
   group_by(userId) %>%
@@ -338,12 +345,14 @@ user_avgs <- train %>%
 We can now construct predictors and see how much the RMSE improves:
 
 ```{r}
+# compute predicted values on test set
 predicted_ratings <- test %>% 
   left_join(movie_avgs, by='movieId') %>%
   left_join(user_avgs, by='userId') %>%
   mutate(pred = mu + b_i + b_u) %>%
   .$pred
 
+# create a results table with this and prior approaches
 model_2_rmse <- RMSE(predicted_ratings, test$rating)
 rmse_results <- bind_rows(rmse_results,
                           tibble(method="Movie and User Effects Model on test set",  
@@ -431,6 +440,8 @@ $$
 Here we use cross-validation to pick a $\lambda$:
 
 ```{r}
+# use cross-validation to pick a lambda:
+  
 lambda <- seq(0, 10, 0.25)
 
 rmses <- sapply(lambda, function(l){
@@ -456,30 +467,35 @@ rmses <- sapply(lambda, function(l){
 })
 
 qplot(lambda, rmses)  
-
+# pick lambda with minimun rmse
 lambda <- lambda[which.min(rmses)]
+# print lambda
 lambda
 ```
 
 We use the test set for the final assessment of our third model
 
 ```{r}
-b_i <- test %>% 
+# compute movie effect with regularization on train set
+b_i <- train %>% 
   group_by(movieId) %>%
   summarize(b_i = sum(rating - mu)/(n()+lambda))
 
-b_u <- test %>% 
+# compute user effect with regularization on train set
+b_u <- train %>% 
     left_join(b_i, by="movieId") %>%
     group_by(userId) %>%
     summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
-  
+
+# # compute predicted values on test set 
 predicted_ratings <- 
     test %>% 
     left_join(b_i, by = "movieId") %>%
     left_join(b_u, by = "userId") %>%
     mutate(pred = mu + b_i + b_u) %>%
     pull(pred)
- 
+
+# create a results table with this and prior approaches
 model_3_rmse <- RMSE(test$rating, predicted_ratings)
 
 rmse_results <- bind_rows(rmse_results,
@@ -487,6 +503,10 @@ rmse_results <- bind_rows(rmse_results,
                                  RMSE = model_3_rmse))
 rmse_results %>% knitr::kable()
 ```
+
+In this case, the long dataset prevents obscure movies with just a few users increase our RMSE, so the regularization does not produce significant improvements in performance using the RMSE as a metric.
+
+For this reason we discard the model with Reguralization and focus on the movies and users effects to calculate the residuals at next section.
 
 ### Matrix factorization
 
@@ -505,11 +525,24 @@ $$
 We compute the residuals for train and test set:
 
 ```{r}
+# compute movie effect without regularization on train set
+b_i <- train %>% 
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - mu))
+
+# compute user effect without regularization on train set
+b_u <- train %>% 
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = mean(rating - b_i - mu))
+
+# compute residuals on train set
 train <- train %>% 
   left_join(b_i, by = "movieId") %>%
   left_join(b_u, by = "userId") %>%
   mutate(res = rating - mu - b_i - b_u)
 
+# compute residuals on test set
 test <- test %>% 
   left_join(b_i, by = "movieId") %>%
   left_join(b_u, by = "userId") %>%
@@ -518,99 +551,89 @@ test <- test %>%
 
 Matrix Factorization is a popular technique to solve recommender system problem. The main idea is to approximate the matrix $R_{m,n}$ by the product of two matrixes of lower dimension: $P_{k, m}$  and  $Q_{k, n}$.
 
-Matrix P represents latent factors of users. So, each k-elements column of matrix P represents each user. Each k-elements column of matrix Q represents each item. So, to find rating for item i by user u we simply need to compute two vectors: $P[,u]’$ x $Q[,i]$. Short and full description of package is available [here](https://rpubs.com/tarashnot/recommender_comparison).
+Matrix P represents latent factors of users. So, each k-elements column of matrix P represents each user. Each k-elements column of matrix Q represents each item. So, to find rating for item i by user u we simply need to compute two vectors: $P[,u]’$ x $Q[,i]$. Short and full description of package is available [here](https://cran.r-project.org/web/packages/recosystem/vignettes/introduction.html).
 
 This package works with data saved on disk in 3 columns with no headers.
 
 The usage of recosystem is quite simple, mainly consisting of the following steps:
 
  - Create a model object (a Reference Class object in R) by calling `Reco()`.
- - (Optionally) call the `$tune()` method to select best tuning paramete.rs along a set of candidate values.
+ - (Optionally) call the `$tune()` method to select best tuning parameters along a set of candidate values.
  - Train the model by calling the `$train()` method. A number of parameters can be set inside the function, possibly   coming from the result of `$tune()`.
  - (Optionally) export the model via `$output()`, i.e. write the factorization matrices $P$ and $Q$ into files or return them as R objects.
  - Use the `$predict()` method to compute predicted values.
 
 ```{r}
 
-# Using recosystem 
 # Install/Load recosystem
 if(!require(recosystem)) install.packages("recosystem", repos = "http://cran.us.r-project.org")
 
+# create data saved on disk in 3 columns with no headers
 train_data <- data_memory(user_index = train$userId, item_index = train$movieId, 
                           rating = train$res, index1 = T)
   
 test_data <- data_memory(user_index = test$userId, item_index = test$movieId, index1 = T)
   
+# create a model object
 recommender <- Reco()
-
-
 ```
 
-We use cross validation to tune the model parameters. Choices for parameters were optimized using RMSE as a loss function. The code does not run here as it takes over one hours to optimize, but we show the oput of the code.
+We use cross validation to tune the model parameters.the parameters are chosen by minimizing RMSE as a loss function. The code does not run here as it takes over one hour to optimize, but we show its output.
 
 ```{r}
-set.seed(1) # This is a randomized algorithm
+# This is a randomized algorithm
+set.seed(1) 
 
-# res = recommender$tune(
-#     train_data,
-#     opts = list(dim = c(10, 20, 30),
-#                 costp_l1 = 0, costq_l1 = 0,
-#                 lrate = c(0.05, 0.1, 0.2), nthread = 2)
-# )
-#  res[["min"]]
-# $dim
-# [1] 30
-# 
-# $costp_l1
-# [1] 0
-# 
-# $costp_l2
-# [1] 0.01
-# 
-# $costq_l1
-# [1] 0
-# 
-# $costq_l2
-# [1] 0.1
-# 
-# $lrate
-# [1] 0.1
-# 
-# $loss_fun
-# [1] 0.8007686
+# call the `$tune()` method to select best tuning parameters
+res = recommender$tune(
+    train_data,
+    opts = list(dim = c(10, 20, 30),
+                costp_l1 = 0, costq_l1 = 0,
+                lrate = c(0.05, 0.1, 0.2), nthread = 2)
+)
+
+# show best tuning parameters
+print(res$min)
 
 ```
 
 The following code trains a recommender model. It will read from a training data source and create a model file at the specified location. The model file contains necessary information for prediction.
 
 ```{r}
-# Training model from a data file
-set.seed(1) # This is a randomized algorithm
+# Train the model by calling the `$train()` method
+# some parameters coming from the result of `$tune()`
+# This is a randomized algorithm
+set.seed(1) 
 suppressWarnings(recommender$train(train_data, opts = c(dim = 30, costp_l1 = 0,
                                                         costp_l2 = 0.01, costq_l1 = 0,
-                                                        costq_l2 = 0.1, lrate = 0.1,
+                                                        costq_l2 = 0.1, lrate = 0.05,
                                                         verbose = FALSE)))
 ```
 
 We predict unknown entries in the rating matrix on test set.
 
 ```{r}
+# use the `$predict()` method to compute predicted values
+# return predicted values in memory
 predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + test$b_i + test$b_u 
 ```
 
 We use the test set for the final assessment
 
 ```{r}  
+# ceiling rating at 5
 ind <- which(predicted_ratings > 5)
 predicted_ratings[ind] <- 5
-  
+
+# floor rating at 0.50  
 ind <- which(predicted_ratings < 0.5)
 predicted_ratings[ind] <- 0.5
   
+# create a results table with this approach
 model_4_rmse <- RMSE(test$rating, predicted_ratings)
   
 rmse_results <- bind_rows(rmse_results,
-                          tibble(method="Reg. Movie and User + Matrix Fact. on test set",  
+                          tibble(method="Movie and User + Matrix Fact. on test set",  
                                    RMSE = model_4_rmse))
 rmse_results %>% knitr::kable()
 
@@ -620,57 +643,82 @@ Lastly, to meet the requirements of the project we calculate the final RMSE on t
 We will use the edx dataset provided that ensures that it contains the users who are in validation set.
 
 ```{r}
-
-b_i <- edx %>% 
+# compute movies effect without regularization on edx set
+b_i <- edx %>%
   group_by(movieId) %>%
-  summarize(b_i = sum(rating - mu)/(n()+lambda))
+  summarize(b_i = mean(rating - mu))
 
-b_u <- edx %>% 
+# compute users effect without regularization on edx set
+b_u <- edx %>%
     left_join(b_i, by="movieId") %>%
     group_by(userId) %>%
-    summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
+    summarize(b_u = mean(rating - b_i - mu))
 
+# compute residuals on edx set
 edx <- edx %>% 
   left_join(b_i, by = "movieId") %>%
   left_join(b_u, by = "userId") %>%
   mutate(res = rating - mu - b_i - b_u)
 
+# compute residuals on validation set
 validation <- validation %>% 
   left_join(b_i, by = "movieId") %>%
   left_join(b_u, by = "userId") %>%
   mutate(res = rating - mu - b_i - b_u)
 
 # Using recosystem 
-train_data <- data_memory(user_index = edx$userId, item_index = edx$movieId, 
+# create data saved on disk in 3 columns with no headers
+
+edx_data <- data_memory(user_index = edx$userId, item_index = edx$movieId, 
                           rating = edx$res, index1 = T)
   
-test_data <- data_memory(user_index = validation$userId, item_index = validation$movieId, index1 = T)
-  
+validation_data <- data_memory(user_index = validation$userId, item_index = validation$movieId, index1 = T)
+
+# create a model object  
 recommender <- Reco()
+
+# Train the model by calling the `$train()` method
+# some parameters coming from the result of `$tune()`
+# This is a randomized algorithm
 set.seed(1)
 
-suppressWarnings(recommender$train(train_data, opts = c(dim = 30, costp_l1 = 0,
+suppressWarnings(recommender$train(edx_data, opts = c(dim = 30, costp_l1 = 0,
                                                         costp_l2 = 0.01, costq_l1 = 0,
-                                                        costq_l2 = 0.1, lrate = 0.1,
+                                                        costq_l2 = 0.1, lrate = 0.05,
                                                         verbose = FALSE)))
 
+# use the `$predict()` method to compute predicted values
+# return predicted values in memory
 
-predicted_ratings <- recommender$predict(test_data, out_memory()) + mu + 
+predicted_ratings <- recommender$predict(validation_data, out_memory()) + mu + 
                        validation$b_i + validation$b_u 
 
-  
+# ceiling rating at 5  
 ind <- which(predicted_ratings > 5)
 predicted_ratings[ind] <- 5
-  
+
+# floor rating at 5  
 ind <- which(predicted_ratings < 0.5)
 predicted_ratings[ind] <- 0.5
   
+# create a results table with this and prior approaches
 model_5_rmse <- RMSE(validation$rating, predicted_ratings)
   
 rmse_results <- bind_rows(rmse_results,
-                          tibble(method="Reg. Movie and User + Matrix Fact. on validation set",  
+                          tibble(method="Movie and User effects and Matrix Fact. on validation set",  
                                    RMSE = model_5_rmse))
 rmse_results %>% knitr::kable()
 
 ```
 
+### Summary 
+
+The data set is very long, so we train models that allow the data set can be adjusted and processed within the available RAM in personal machine.
+
+The long dataset prevents obscure movies with just a few users increase our RMSE, so the regularization does not produce significant improvements in performance using the RMSE as a metric.
+
+We discard the model with Reguralization and focus on the movies and users effects to calculate the residuals.
+
+This residuals were modeled using Matrix Factorization.
+
+We reach a RMSE of <b>0.794</b> on `validation` set using the full `edx` set for training. *The model Movie and User effects and Matrix Factorization* achieved this performance using the methodology presented in the [course's book](https://rafalab.github.io/dsbook/large-datasets.html#recommendation-systems) without regularization and the R package `recosystem`. 
